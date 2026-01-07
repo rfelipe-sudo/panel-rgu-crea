@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel Coordinador - Optimizador RGU CREA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        .tech-card { transition: all 0.3s; }
+        .tech-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .status-bar { transition: width 0.5s ease; }
+        @keyframes pulse-glow { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .pulse-glow { animation: pulse-glow 2s infinite; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-6">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-blue-600 to-blue-800 rounded-lg shadow-lg p-6 mb-6 text-white">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-3xl font-bold mb-2">Panel Coordinador - Optimizador RGU</h1>
+                    <p class="text-blue-100">Sistema inteligente de recomendaciones con Claude AI</p>
+                </div>
+                <div class="text-right">
+                    <div class="text-sm text-blue-100 mb-1">Última actualización</div>
+                    <div id="lastUpdate" class="text-xl font-mono">--:--:--</div>
+                    <button onclick="refreshData()" class="mt-2 bg-white text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 transition">
+                        🔄 Actualizar
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Métricas Generales -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-gray-500 text-sm mb-1">Técnicos Activos</div>
+                <div id="totalTecnicos" class="text-3xl font-bold text-gray-800">--</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-gray-500 text-sm mb-1">Sobre Meta ≥4 RGU/día</div>
+                <div id="sobreMeta" class="text-3xl font-bold text-green-600">--</div>
+                <div id="porcentajeSobre" class="text-xs text-gray-500">--</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-gray-500 text-sm mb-1">Bajo Meta <4 RGU/día</div>
+                <div id="bajoMeta" class="text-3xl font-bold text-orange-600">--</div>
+                <div id="porcentajeBajo" class="text-xs text-gray-500">--</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-gray-500 text-sm mb-1">RGU Promedio General</div>
+                <div id="promedioGeneral" class="text-3xl font-bold text-blue-600">--</div>
+            </div>
+        </div>
+
+        <!-- Tabs de Navegación -->
+        <div class="bg-white rounded-lg shadow mb-6">
+            <div class="flex border-b">
+                <button onclick="showTab('alerta')" id="tabAlerta" class="px-6 py-3 font-semibold text-orange-600 border-b-2 border-orange-600">
+                    🚨 Requieren Atención (<span id="countAlertas">0</span>)
+                </button>
+                <button onclick="showTab('cercanos')" id="tabCercanos" class="px-6 py-3 font-semibold text-gray-500 hover:text-gray-700">
+                    🎯 Cerca de Meta (<span id="countCercanos">0</span>)
+                </button>
+                <button onclick="showTab('todos')" id="tabTodos" class="px-6 py-3 font-semibold text-gray-500 hover:text-gray-700">
+                    👥 Todos los Técnicos
+                </button>
+            </div>
+
+            <!-- Contenido de tabs -->
+            <div class="p-6">
+                <!-- Tab: Técnicos en Alerta -->
+                <div id="contentAlerta" class="tab-content">
+                    <div class="mb-4 p-4 bg-orange-50 border-l-4 border-orange-500 rounded">
+                        <div class="flex items-center">
+                            <span class="text-2xl mr-3">⚠️</span>
+                            <div>
+                                <div class="font-bold text-orange-800">Técnicos Prioritarios</div>
+                                <div class="text-sm text-orange-700">Estos técnicos necesitan carga inmediata para alcanzar la meta</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="listAlertas" class="space-y-4"></div>
+                </div>
+
+                <!-- Tab: Técnicos Cercanos a Meta -->
+                <div id="contentCercanos" class="tab-content hidden">
+                    <div class="mb-4 p-4 bg-blue-50 border-l-4 border-blue-500 rounded">
+                        <div class="flex items-center">
+                            <span class="text-2xl mr-3">🎯</span>
+                            <div>
+                                <div class="font-bold text-blue-800">Cerca de Alcanzar Meta</div>
+                                <div class="text-sm text-blue-700">Técnicos que pueden llegar a 4 RGU/día con 1-2 trabajos más</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="listCercanos" class="space-y-4"></div>
+                </div>
+
+                <!-- Tab: Todos -->
+                <div id="contentTodos" class="tab-content hidden">
+                    <div class="mb-4 flex justify-between items-center">
+                        <input type="text" id="searchTecnico" placeholder="🔍 Buscar técnico..." 
+                               class="px-4 py-2 border rounded-lg w-96">
+                        <select id="ordenar" class="px-4 py-2 border rounded-lg">
+                            <option value="rgu_total">Ordenar por RGU Total</option>
+                            <option value="rgu_diario">Ordenar por RGU/Día</option>
+                            <option value="gap">Ordenar por Gap a Meta</option>
+                            <option value="nombre">Ordenar por Nombre</option>
+                        </select>
+                    </div>
+                    <div id="listTodos" class="space-y-4"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Panel de Recomendaciones de Claude -->
+        <div id="claudePanel" class="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg shadow-lg p-6 hidden">
+            <div class="flex items-start mb-4">
+                <div class="text-3xl mr-4">🤖</div>
+                <div class="flex-1">
+                    <h3 class="text-xl font-bold text-purple-900 mb-2">Recomendación de Claude AI</h3>
+                    <div id="claudeRecommendation" class="text-gray-700 leading-relaxed"></div>
+                </div>
+                <button onclick="closeClaudePanel()" class="text-gray-400 hover:text-gray-600 text-2xl">×</button>
+            </div>
+            <div id="claudeActions" class="mt-4 flex gap-3"></div>
+        </div>
+    </div>
+
+    <script>
+        // Configuración Supabase
+        const SUPABASE_URL = 'https://efvicvqffvxocnrqjxrs.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVmdmljdnFmZnZ4b2NucnFqeHJzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTQzNzgyMywiZXhwIjoyMDgxMDEzODIzfQ.ERKMCrF3WO-Uz6RfYbYxgden0HoeUGpOthSwamh1A3I';
+        const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // Estado global
+        let tecnicos = [];
+        let tiposTrabajo = {};
+        let currentTab = 'alerta';
+
+        // Inicialización
+        async function init() {
+            await loadData();
+            setInterval(loadData, 60000); // Actualizar cada minuto
+        }
+
+        // Cargar datos desde Supabase
+        async function loadData() {
+            try {
+                const { data, error } = await sbClient
+                    .from('produccion_crea')
+                    .select('*');
+
+                if (error) throw error;
+
+                console.log(`✓ Datos cargados: ${data.length} registros`);
+                processData(data);
+                updateUI();
+                updateLastUpdateTime();
+            } catch (err) {
+                console.error('Error cargando datos:', err);
+                alert('Error conectando a Supabase. Verifica la configuración.');
+            }
+        }
+
+        // Procesar datos
+        function processData(data) {
+            if (data.length === 0) {
+                tecnicos = [];
+                return;
+            }
+
+            const hoy = new Date();
+            const mesActual = hoy.getMonth() + 1; // 1 para enero
+            
+            console.log(`🔍 Buscando datos del mes: ${mesActual}`);
+
+            const tecnicosMap = {};
+            tiposTrabajo = {};
+
+            data.forEach(row => {
+                const fecha = row.fecha_trabajo || '';
+                
+                // Detectar si la fecha corresponde al mes actual (múltiples formatos)
+                let perteneceAlMes = false;
+                
+                // Formato: DD/MM/YY o DD/MM/YYYY o D/M/YY
+                if (fecha.includes('/')) {
+                    const partes = fecha.split('/');
+                    if (partes.length >= 2) {
+                        const mes = parseInt(partes[1]);
+                        if (mes === mesActual) perteneceAlMes = true;
+                    }
+                }
+                // Formato: DD.MM.YY o DD.MM.YYYY
+                else if (fecha.includes('.')) {
+                    const partes = fecha.split('.');
+                    if (partes.length >= 2) {
+                        const mes = parseInt(partes[1]);
+                        if (mes === mesActual) perteneceAlMes = true;
+                    }
+                }
+                // Formato: YYYY-MM-DD
+                else if (fecha.includes('-')) {
+                    const partes = fecha.split('-');
+                    if (partes.length >= 2) {
+                        const mes = parseInt(partes[1]);
+                        if (mes === mesActual) perteneceAlMes = true;
+                    }
+                }
+                
+                if (perteneceAlMes && row.estado === 'Completado') {
+                    const rut = row.rut_tecnico;
+
+                    // Agrupar por técnico
+                    if (!tecnicosMap[rut]) {
+                        tecnicosMap[rut] = {
+                            rut: rut,
+                            nombre: row.tecnico,
+                            ordenes: 0,
+                            rgu_total: 0,
+                            duraciones: [],
+                            fechas: new Set(),
+                            tipos: {}
+                        };
+                    }
+
+                    tecnicosMap[rut].ordenes++;
+                    tecnicosMap[rut].rgu_total += parseFloat(row.rgu_total || 0);
+                    tecnicosMap[rut].fechas.add(fecha);
+                    
+                    if (row.duracion_min) {
+                        tecnicosMap[rut].duraciones.push(row.duracion_min);
+                    }
+
+                    // Tipos de trabajo
+                    const tipo = row.tipo_orden || 'Sin tipo';
+                    tecnicosMap[rut].tipos[tipo] = (tecnicosMap[rut].tipos[tipo] || 0) + 1;
+
+                    if (!tiposTrabajo[tipo]) {
+                        tiposTrabajo[tipo] = { count: 0, rgu_sum: 0, dur_sum: 0, dur_count: 0 };
+                    }
+                    tiposTrabajo[tipo].count++;
+                    tiposTrabajo[tipo].rgu_sum += parseFloat(row.rgu_total || 0);
+                    if (row.duracion_min) {
+                        tiposTrabajo[tipo].dur_sum += row.duracion_min;
+                        tiposTrabajo[tipo].dur_count++;
+                    }
+                }
+            });
+
+            // Calcular métricas por técnico
+            tecnicos = Object.values(tecnicosMap).map(t => {
+                const dias = t.fechas.size;
+                const rgu_diario = t.rgu_total / Math.max(dias, 1);
+                const duracion_prom = t.duraciones.length > 0 
+                    ? t.duraciones.reduce((a, b) => a + b, 0) / t.duraciones.length 
+                    : 0;
+
+                return {
+                    ...t,
+                    dias,
+                    rgu_diario,
+                    duracion_prom,
+                    gap_meta: 4 - rgu_diario,
+                    velocidad: t.ordenes / Math.max(dias, 1)
+                };
+            });
+
+            tecnicos.sort((a, b) => b.rgu_total - a.rgu_total);
+            
+            console.log(`✓ Procesados ${tecnicos.length} técnicos del mes ${mesActual}`);
+        }
+
+        // Actualizar UI
+        function updateUI() {
+            if (tecnicos.length === 0) {
+                document.getElementById('totalTecnicos').textContent = '0';
+                document.getElementById('sobreMeta').textContent = '0';
+                document.getElementById('porcentajeSobre').textContent = '0%';
+                document.getElementById('bajoMeta').textContent = '0';
+                document.getElementById('porcentajeBajo').textContent = '0%';
+                document.getElementById('promedioGeneral').textContent = '0.00';
+                
+                document.getElementById('listAlertas').innerHTML = '<div class="text-gray-500 text-center py-8">No hay datos del mes actual</div>';
+                document.getElementById('listCercanos').innerHTML = '<div class="text-gray-500 text-center py-8">No hay datos del mes actual</div>';
+                document.getElementById('listTodos').innerHTML = '<div class="text-gray-500 text-center py-8">No hay datos del mes actual</div>';
+                return;
+            }
+
+            // Métricas generales
+            const sobreMeta = tecnicos.filter(t => t.gap_meta <= 0).length;
+            const bajoMeta = tecnicos.filter(t => t.gap_meta > 0).length;
+            const promedioGen = tecnicos.reduce((sum, t) => sum + t.rgu_diario, 0) / tecnicos.length;
+
+            document.getElementById('totalTecnicos').textContent = tecnicos.length;
+            document.getElementById('sobreMeta').textContent = sobreMeta;
+            document.getElementById('porcentajeSobre').textContent = `${(sobreMeta/tecnicos.length*100).toFixed(1)}%`;
+            document.getElementById('bajoMeta').textContent = bajoMeta;
+            document.getElementById('porcentajeBajo').textContent = `${(bajoMeta/tecnicos.length*100).toFixed(1)}%`;
+            document.getElementById('promedioGeneral').textContent = promedioGen.toFixed(2);
+
+            // Actualizar tabs
+            renderTecnicos();
+        }
+
+        // Renderizar técnicos según tab activo
+        function renderTecnicos() {
+            const alertas = tecnicos.filter(t => t.gap_meta > 0 && t.dias > 0);
+            const cercanos = tecnicos.filter(t => t.gap_meta > 0 && t.gap_meta <= 1 && t.dias > 0);
+
+            document.getElementById('countAlertas').textContent = alertas.length;
+            document.getElementById('countCercanos').textContent = cercanos.length;
+
+            document.getElementById('listAlertas').innerHTML = alertas.map(t => renderTecnicoCard(t, 'alerta')).join('');
+            document.getElementById('listCercanos').innerHTML = cercanos.map(t => renderTecnicoCard(t, 'cercano')).join('');
+            document.getElementById('listTodos').innerHTML = tecnicos.map(t => renderTecnicoCard(t, 'all')).join('');
+        }
+
+        // Renderizar card de técnico
+        function renderTecnicoCard(tecnico, tipo) {
+            const colorGap = tecnico.gap_meta > 2 ? 'red' : tecnico.gap_meta > 1 ? 'orange' : tecnico.gap_meta > 0 ? 'yellow' : 'green';
+            const progresoMeta = Math.min((tecnico.rgu_diario / 4) * 100, 100);
+
+            return `
+                <div class="tech-card bg-white rounded-lg shadow-md p-4 border-l-4 border-${colorGap}-500">
+                    <div class="flex justify-between items-start mb-3">
+                        <div class="flex-1">
+                            <h3 class="font-bold text-lg text-gray-800">${tecnico.nombre}</h3>
+                            <div class="text-sm text-gray-500">RUT: ${tecnico.rut}</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-2xl font-bold ${tecnico.gap_meta > 0 ? 'text-orange-600' : 'text-green-600'}">
+                                ${tecnico.rgu_diario.toFixed(2)}
+                            </div>
+                            <div class="text-xs text-gray-500">RGU/día</div>
+                        </div>
+                    </div>
+
+                    <!-- Barra de progreso -->
+                    <div class="mb-3">
+                        <div class="flex justify-between text-xs text-gray-600 mb-1">
+                            <span>Progreso a meta 4.0</span>
+                            <span>${progresoMeta.toFixed(0)}%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div class="status-bar bg-gradient-to-r from-${colorGap}-400 to-${colorGap}-600 h-2 rounded-full" 
+                                 style="width: ${progresoMeta}%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Métricas -->
+                    <div class="grid grid-cols-4 gap-2 mb-3 text-center text-sm">
+                        <div>
+                            <div class="text-gray-500 text-xs">Días</div>
+                            <div class="font-bold">${tecnico.dias}</div>
+                        </div>
+                        <div>
+                            <div class="text-gray-500 text-xs">Órdenes</div>
+                            <div class="font-bold">${tecnico.ordenes}</div>
+                        </div>
+                        <div>
+                            <div class="text-gray-500 text-xs">RGU Total</div>
+                            <div class="font-bold">${tecnico.rgu_total.toFixed(1)}</div>
+                        </div>
+                        <div>
+                            <div class="text-gray-500 text-xs">Min/Ord</div>
+                            <div class="font-bold">${Math.round(tecnico.duracion_prom)}</div>
+                        </div>
+                    </div>
+
+                    ${tecnico.gap_meta > 0 ? `
+                        <div class="bg-orange-50 rounded p-2 mb-2">
+                            <div class="text-xs text-orange-800 font-semibold">
+                                ⚠️ Necesita <span class="text-orange-600 font-bold">${tecnico.gap_meta.toFixed(1)} RGU</span> más para alcanzar meta
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <!-- Botón de recomendación -->
+                    <button onclick="getClaudeRecommendation('${tecnico.rut}')" 
+                            class="w-full mt-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white py-2 rounded-lg hover:from-purple-700 hover:to-blue-700 transition flex items-center justify-center gap-2">
+                        <span>🤖</span>
+                        <span>Obtener Recomendación IA</span>
+                    </button>
+                </div>
+            `;
+        }
+
+        // Obtener recomendación de Claude
+        async function getClaudeRecommendation(rutTecnico) {
+            const tecnico = tecnicos.find(t => t.rut === rutTecnico);
+            if (!tecnico) return;
+
+            // Mostrar panel con loading
+            const panel = document.getElementById('claudePanel');
+            panel.classList.remove('hidden');
+            document.getElementById('claudeRecommendation').innerHTML = `
+                <div class="flex items-center gap-3">
+                    <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
+                    <span>Claude está analizando el caso de ${tecnico.nombre}...</span>
+                </div>
+            `;
+
+            // Preparar datos para Claude
+            const trabajosDisponibles = getTrabajosSugeridos(tecnico);
+            
+            const prompt = `Eres un asistente experto en optimización de productividad para técnicos de telecomunicaciones.
+
+CONTEXTO DEL TÉCNICO:
+- Nombre: ${tecnico.nombre}
+- RGU actual/día: ${tecnico.rgu_diario.toFixed(2)}
+- Meta: 4.0 RGU/día
+- Gap a meta: ${tecnico.gap_meta.toFixed(2)} RGU
+- Días trabajados este mes: ${tecnico.dias}
+- Órdenes completadas: ${tecnico.ordenes}
+- Tiempo promedio por orden: ${Math.round(tecnico.duracion_prom)} minutos
+- Velocidad: ${tecnico.velocidad.toFixed(1)} órdenes/día
+
+TRABAJOS DISPONIBLES EN LA ZONA (ordenados por conveniencia):
+${trabajosDisponibles.map((t, i) => `${i+1}. ${t.tipo} - ${t.rgu} RGU - ~${t.duracion_prom} min - ${t.dificultad}`).join('\n')}
+
+TAREA:
+Analiza el caso y proporciona UNA recomendación clara y accionable para el coordinador. Incluye:
+
+1. Diagnóstico breve (1 línea)
+2. Recomendación específica de qué trabajo asignar y por qué
+3. Impacto esperado en el RGU del técnico
+
+Sé conciso, directo y enfócate en la acción inmediata. Máximo 4 líneas.`;
+
+            try {
+                const response = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': 'PEGA_TU_API_KEY_AQUI',
+                        'anthropic-version': '2023-06-01'
+                    },
+                    body: JSON.stringify({
+                        model: 'claude-sonnet-4-20250514',
+                        max_tokens: 1000,
+                        messages: [{
+                            role: 'user',
+                            content: prompt
+                        }]
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error.message);
+                }
+                
+                const recommendation = data.content[0].text;
+
+                document.getElementById('claudeRecommendation').innerHTML = recommendation;
+                
+                // Mostrar botones de acción
+                document.getElementById('claudeActions').innerHTML = `
+                    <button onclick="asignarTrabajo('${rutTecnico}')" 
+                            class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition">
+                        ✓ Asignar Trabajo Recomendado
+                    </button>
+                    <button onclick="verMasOpciones('${rutTecnico}')" 
+                            class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition">
+                        📋 Ver Más Opciones
+                    </button>
+                `;
+
+            } catch (error) {
+                console.error('Error llamando a Claude:', error);
+                document.getElementById('claudeRecommendation').innerHTML = `
+                    <div class="text-red-600">
+                        <strong>Error obteniendo recomendación:</strong><br>
+                        ${error.message}<br><br>
+                        <span class="text-sm">Verifica que tu API key esté correcta en el código (línea que dice PEGA_TU_API_KEY_AQUI)</span>
+                    </div>
+                `;
+            }
+        }
+
+        // Sugerir trabajos basados en perfil del técnico
+        function getTrabajosSugeridos(tecnico) {
+            const trabajos = Object.entries(tiposTrabajo)
+                .map(([tipo, stats]) => ({
+                    tipo,
+                    rgu: (stats.rgu_sum / stats.count).toFixed(2),
+                    duracion_prom: Math.round(stats.dur_sum / Math.max(stats.dur_count, 1)),
+                    count: stats.count,
+                    dificultad: stats.dur_sum / Math.max(stats.dur_count, 1) < 60 ? 'Fácil' : 
+                               stats.dur_sum / Math.max(stats.dur_count, 1) < 120 ? 'Media' : 'Alta'
+                }))
+                .sort((a, b) => {
+                    const scoreA = a.rgu * 100 - a.duracion_prom;
+                    const scoreB = b.rgu * 100 - b.duracion_prom;
+                    return scoreB - scoreA;
+                })
+                .slice(0, 5);
+
+            return trabajos;
+        }
+
+        // Funciones de acción
+        function asignarTrabajo(rutTecnico) {
+            alert(`Redirigiendo a sistema de asignación para técnico ${rutTecnico}...`);
+        }
+
+        function verMasOpciones(rutTecnico) {
+            const tecnico = tecnicos.find(t => t.rut === rutTecnico);
+            const trabajos = getTrabajosSugeridos(tecnico);
+            
+            const lista = trabajos.map((t, i) => 
+                `${i+1}. ${t.tipo}\n   RGU: ${t.rgu} | Duración: ${t.duracion_prom} min | ${t.dificultad}`
+            ).join('\n\n');
+            
+            alert(`TRABAJOS SUGERIDOS PARA ${tecnico.nombre}:\n\n${lista}`);
+        }
+
+        function closeClaudePanel() {
+            document.getElementById('claudePanel').classList.add('hidden');
+        }
+
+        // Navegación de tabs
+        function showTab(tab) {
+            currentTab = tab;
+            
+            ['alerta', 'cercanos', 'todos'].forEach(t => {
+                const btn = document.getElementById(`tab${t.charAt(0).toUpperCase() + t.slice(1)}`);
+                const content = document.getElementById(`content${t.charAt(0).toUpperCase() + t.slice(1)}`);
+                
+                if (t === tab) {
+                    btn.classList.add('text-orange-600', 'border-b-2', 'border-orange-600');
+                    btn.classList.remove('text-gray-500');
+                    content.classList.remove('hidden');
+                } else {
+                    btn.classList.remove('text-orange-600', 'border-b-2', 'border-orange-600');
+                    btn.classList.add('text-gray-500');
+                    content.classList.add('hidden');
+                }
+            });
+        }
+
+        function refreshData() {
+            loadData();
+        }
+
+        function updateLastUpdateTime() {
+            const now = new Date();
+            document.getElementById('lastUpdate').textContent = now.toLocaleTimeString('es-CL');
+        }
+
+        // Iniciar aplicación
+        init();
+    </script>
+</body>
+</html>
